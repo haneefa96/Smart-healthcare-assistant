@@ -1,0 +1,20 @@
+# Git ignore patterns for Healthcare Robot project
+# ── Build artifacts
+firmware/.pio/
+firmware/.vscode/
+
+# ── Python
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/venv/
+backend/.venv/
+
+# ── Credentials
+*.env
+*.key
+secrets.h
+
+# ── IDE
+.vscode/
+*.code-workspace

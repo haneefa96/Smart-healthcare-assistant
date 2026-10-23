@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HealthBot OS — Smart Healthcare Assistant Robot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-background"></div>
+  
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20M2 12h20M7 7l10 10M17 7L7 17" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>HealthBot <span class="badge-version">OS v1.0</span></h1>
+          <p class="subtitle">ESP32-S3 Medical Assistant Telemetry & Control</p>
+        </div>
+      </div>
+
+      <!-- Connection Manager -->
+      <div class="connection-bar">
+        <div class="ip-input-group">
+          <span class="input-prefix">ws://</span>
+          <input type="text" id="robotIpInput" placeholder="Robot IP (e.g. 192.168.1.105)" value="" spellcheck="false" autocomplete="off" />
+          <span class="input-suffix">/ws/control</span>
+        </div>
+        <button id="connectBtn" class="btn btn-connect" onclick="toggleConnection()">
+          <span class="btn-dot"></span>
+          <span class="btn-label">Connect</span>
+        </button>
+      </div>
+
+      <div class="system-status-pills">
+        <div class="status-pill" id="wsPill">
+          <span class="indicator-dot"></span>
+          <span class="pill-text" id="wsStatusText">Disconnected</span>
+        </div>
+        <div class="status-pill latency-pill">
+          <svg class="pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          <span id="latencyText">-- ms</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Dashboard Grid -->
+    <main class="dashboard-grid">
+
+      <!-- LEFT COLUMN: Vitals & Voice AI -->
+      <section class="grid-col left-col">
+        
+        <!-- VITALS MONITOR CARD -->
+        <article class="glass-card vitals-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">🫀</span>
+              <div>
+                <h2>Live Patient Vitals</h2>
+                <p>MAX30102 Optical PPG & Digital DSP</p>
+              </div>
+            </div>
+            <div class="finger-badge" id="fingerBadge">
+              <span class="finger-dot"></span>
+              <span id="fingerText">Sensor Idle</span>
+            </div>
+          </div>
+
+          <div class="vitals-display-row">
+            <!-- Heart Rate Box -->
+            <div class="vital-metric-box hr-metric">
+              <div class="metric-top">
+                <span class="metric-label">Heart Rate</span>
+                <span class="pulse-indicator" id="pulseIndicator"></span>
+              </div>
+              <div class="metric-main">
+                <span class="metric-value" id="hrValue">--</span>
+                <span class="metric-unit">BPM</span>
+              </div>
+              <div class="metric-footer">
+                <span class="status-tag" id="hrCategory">No Finger Detected</span>
+              </div>
+            </div>
+
+            <!-- SpO2 Box -->
+            <div class="vital-metric-box spo2-metric">
+              <div class="metric-top">
+                <span class="metric-label">Blood Oxygen (SpO₂)</span>
+                <span class="sensor-type">IR/RED</span>
+              </div>
+              <div class="metric-main">
+                <span class="metric-value" id="spo2Value">--</span>
+                <span class="metric-unit">%</span>
+              </div>
+              <div class="metric-footer">
+                <div class="bar-track">
+                  <div class="bar-fill" id="spo2Bar"></div>
+                </div>
+                <span class="bar-label" id="spo2Category">Awaiting signal</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Realtime Simulated/Sample ECG Rhythm Canvas -->
+          <div class="ecg-container">
+            <div class="ecg-header">
+              <span>PPG / Pulse Waveform Stream</span>
+              <span class="ecg-sample-rate">100 Hz Sampling</span>
+            </div>
+            <canvas id="ecgCanvas" width="600" height="90"></canvas>
+          </div>
+        </article>
+
+        <!-- VOICE ASSISTANT CARD -->
+        <article class="glass-card voice-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">🎙️</span>
+              <div>
+                <h2>AI Voice Assistant</h2>
+                <p>INMP441 Mic • Whisper STT • LLM Agent • MAX98357A TTS</p>
+              </div>
+            </div>
+            <div class="audio-state-pill" id="audioStatePill">
+              <span class="state-dot"></span>
+              <span id="audioStateText">Idle</span>
+            </div>
+          </div>
+
+          <!-- Big Glowing Push-to-Talk Mic -->
+          <div class="voice-hero">
+            <button class="voice-mic-btn" id="voiceMicBtn" onclick="toggleVoice()">
+              <div class="ripple-ring r1"></div>
+              <div class="ripple-ring r2"></div>
+              <div class="ripple-ring r3"></div>
+              <div class="mic-inner-circle">
+                <svg class="mic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
+                </svg>
+              </div>
+            </button>
+            <div class="voice-hint" id="voiceHint">Tap to speak with HealthBot</div>
+          </div>
+
+          <!-- Transcript & Dialogue Log -->
+          <div class="transcript-box">
+            <div class="dialogue-header">
+              <span>Voice Interaction Transcript</span>
+              <button class="btn-clear" onclick="clearTranscript()">Clear</button>
+            </div>
+            <div class="dialogue-scroll" id="dialogueScroll">
+              <div class="dialogue-msg system-msg">
+                <div class="msg-author">Robot System</div>
+                <div class="msg-content">Welcome! Press the microphone or send a message to ask health questions or robot commands.</div>
+              </div>
+            </div>
+            <div class="dialogue-input-row">
+              <input type="text" id="textPromptInput" placeholder="Type a health question (e.g. 'What is a normal pulse?')..." onkeydown="if(event.key==='Enter') sendTextPrompt()" />
+              <button class="btn-send" onclick="sendTextPrompt()">Send</button>
+            </div>
+          </div>
+        </article>
+
+      </section>
+
+      <!-- RIGHT COLUMN: Mobility & Telemetry -->
+      <section class="grid-col right-col">
+
+        <!-- MOBILITY / MOTOR CONTROLLER CARD -->
+        <article class="glass-card drive-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">🕹️</span>
+              <div>
+                <h2>Remote Mobility Control</h2>
+                <p>L298N Dual H-Bridge Differential Drive</p>
+              </div>
+            </div>
+            <div class="keyboard-badge">
+              <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&uarr;&larr;&darr;&rarr;</kbd>
+            </div>
+          </div>
+
+          <!-- D-PAD Controller -->
+          <div class="dpad-controller">
+            <div class="dpad-cell"></div>
+            <button class="dpad-btn dpad-fwd" id="btnFwd" data-dir="F" title="Forward (W)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M12 19V5M5 12l7-7 7 7"/>
+              </svg>
+              <span>FWD</span>
+            </button>
+            <div class="dpad-cell"></div>
+
+            <button class="dpad-btn dpad-left" id="btnLeft" data-dir="L" title="Left (A)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              <span>LEFT</span>
+            </button>
+            <button class="dpad-btn dpad-stop" id="btnStop" data-dir="S" title="Emergency Brake (Space)">
+              <span>STOP</span>
+            </button>
+            <button class="dpad-btn dpad-right" id="btnRight" data-dir="R" title="Right (D)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+              <span>RIGHT</span>
+            </button>
+
+            <div class="dpad-cell"></div>
+            <button class="dpad-btn dpad-back" id="btnBack" data-dir="B" title="Backward (S)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M12 5v14M19 12l-7 7-7-7"/>
+              </svg>
+              <span>BACK</span>
+            </button>
+            <div class="dpad-cell"></div>
+          </div>
+
+          <!-- Speed Slider & Presets -->
+          <div class="speed-control-box">
+            <div class="speed-header">
+              <span class="speed-title">PWM Drive Speed</span>
+              <span class="speed-val" id="speedDisplay">67% (170/255)</span>
+            </div>
+            <input type="range" class="speed-slider" id="speedSlider" min="70" max="255" value="170" step="1" oninput="onSpeedChange(this.value)" />
+            <div class="speed-presets">
+              <button class="preset-btn" onclick="setSpeed(100)">Crawl (40%)</button>
+              <button class="preset-btn active" id="presetMedium" onclick="setSpeed(170)">Cruise (67%)</button>
+              <button class="preset-btn" onclick="setSpeed(240)">Sprint (95%)</button>
+            </div>
+          </div>
+        </article>
+
+        <!-- HARDWARE TELEMETRY & DIAGNOSTICS CARD -->
+        <article class="glass-card diag-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">⚡</span>
+              <div>
+                <h2>ESP32-S3 Hardware Health</h2>
+                <p>FreeRTOS Dual-Core Architecture</p>
+              </div>
+            </div>
+            <div class="uptime-badge" id="uptimeBadge">Up 00:00</div>
+          </div>
+
+          <div class="diag-grid">
+            <div class="diag-item">
+              <span class="diag-label">Core 0 (Networking)</span>
+              <span class="diag-status ok">Audio DMA + Gateway</span>
+            </div>
+            <div class="diag-item">
+              <span class="diag-label">Core 1 (Real-Time)</span>
+              <span class="diag-status ok">Motors + PPG + OLED</span>
+            </div>
+            <div class="diag-item">
+              <span class="diag-label">Watchdog Safety</span>
+              <span class="diag-status ok" id="watchdogStatus">500 ms Auto-Stop Active</span>
+            </div>
+            <div class="diag-item">
+              <span class="diag-label">I2S Audio Pipeline</span>
+              <span class="diag-status" id="audioPipelineText">16 kHz 16-bit Mono</span>
+            </div>
+          </div>
+
+          <div class="diag-actions">
+            <button class="btn btn-secondary" onclick="sendEmergencyStop()">🚨 Emergency Stop</button>
+            <button class="btn btn-secondary" onclick="pingRobot()">📶 Test Ping</button>
+          </div>
+        </article>
+
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>Smart Healthcare Assistant Robot • ESP32-S3 Dual-Core FreeRTOS</span>
+      <span>Designed for Patient Monitoring & Conversational Tele-assistance</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
