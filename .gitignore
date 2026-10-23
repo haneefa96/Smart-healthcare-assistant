@@ -5,7 +5,10 @@ firmware/.vscode/
 
 # ── Python
 backend/__pycache__/
+backend/*/__pycache__/
+**/__pycache__/
 backend/*.pyc
+*.pyc
 backend/.env
 backend/venv/
 backend/.venv/
