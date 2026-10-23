@@ -15,9 +15,64 @@ from stt_engine  import load_model as load_stt, transcribe
 from llm_agent   import load_llm, generate_response
 from tts_engine  import synthesize_chunks
 
+# ── RAG imports ────────────────────────────────────────────────────────────────
+from rag_index import rebuild_index, get_index_stats, is_index_built
+from rag_retriever import retrieve_context, format_context
+from rag_config import validate, get_env_summary, KNOWLEDGE_DIR
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
+# ── RAG state ──────────────────────────────────────────────────────────────────
+_rag_initialized: bool = False
+_rag_error: str | None = None
+
+
+async def init_rag():
+    """Initialize RAG subsystem at startup."""
+    global _rag_initialized, _rag_error
+
+    log.info("[RAG] Initializing RAG subsystem...")
+
+    # Validate configuration
+    valid, error = validate()
+    if not valid:
+        _rag_error = f"RAG validation failed: {error}"
+        log.warning(f"[RAG] {_rag_error}")
+        return False
+
+    log.info(f"[RAG] Config: {get_env_summary()}")
+
+    # Check if knowledge directory has documents
+    import os
+    doc_count = sum(1 for _ in os.listdir(KNOWLEDGE_DIR) if _.endswith(('.pdf', '.txt', '.md')))
+    if doc_count == 0:
+        log.warning(f"[RAG] No documents found in {KNOWLEDGE_DIR}. RAG will return empty results.")
+        log.warning("[RAG] Add PDF/text documents to enable enhanced responses.")
+
+    # Build or load vector store
+    try:
+        # Only rebuild if index is empty (first run)
+        if not is_index_built():
+            log.info("[RAG] Vector store empty — building index...")
+            success = rebuild_index()
+            if not success:
+                log.error("[RAG] Failed to build vector store")
+                _rag_error = "Failed to build vector store"
+                return False
+        else:
+            log.info("[RAG] Loading existing vector store")
+
+        _rag_initialized = True
+        log.info("[RAG] ✅ Vector store ready")
+        return True
+
+    except Exception as e:
+        _rag_error = f"RAG initialization error: {e}"
+        log.error(f"[RAG] {_rag_error}")
+        return False
+
 
 # ── Startup / Shutdown lifespan ───────────────────────────────────────────────
 @asynccontextmanager
@@ -26,6 +81,16 @@ async def lifespan(app: FastAPI):
     load_stt(model_size="base.en", device="cpu")
     log.info("Loading LLM client...")
     load_llm()
+
+    # Initialize RAG
+    await init_rag()
+
+    if _rag_initialized:
+        stats = get_index_stats()
+        log.info(f"[RAG] {stats['chunk_count']} chunks indexed")
+    else:
+        log.warning("[RAG] RAG not initialized — LLM will respond from general knowledge only")
+
     log.info("✅ AI Gateway ready — waiting for ESP32-S3 connection")
     yield
     log.info("Shutting down AI Gateway")
@@ -121,10 +186,30 @@ async def process_utterance(ws: WebSocket, pcm_bytes: bytes, client_id: str):
     except Exception:
         pass
 
-    # 2. LLM Response Generation
+    # 2. RAG Context Retrieval (optional, enabled if configured)
+    context = None
+    sources = []
 
+    if _rag_initialized:
+        try:
+            chunks = retrieve_context(text)
+            if chunks:
+                context = format_context(chunks)
+                sources = [meta.get("source", "unknown") for _, meta, _ in chunks]
+                log.info(f"[{client_id}] Retrieved {len(chunks)} relevant chunks")
+            else:
+                log.info(f"[{client_id}] No relevant context found — using general knowledge")
+        except Exception as e:
+            log.warning(f"[{client_id}] RAG retrieval error: {e}")
+            log.info(f"[{client_id}] Falling back to general knowledge")
+
+    # 3. LLM Response Generation
     try:
-        reply = await generate_response(text)
+        reply, llm_sources = await generate_response(text, context=context)
+        # Merge sources from RAG and LLM
+        all_sources = sources + llm_sources
+        if all_sources:
+            log.info(f"[{client_id}] Sources: {all_sources}")
     except Exception as e:
         log.error(f"[LLM Error] {e}")
         reply = "I'm sorry, I couldn't process that. Please try again."
@@ -148,11 +233,39 @@ async def process_utterance(ws: WebSocket, pcm_bytes: bytes, client_id: str):
 # ── HTTP health check ──────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {
+    status = {
         "status": "online",
         "connections": len(active_connections),
-        "pipeline": "Whisper → LLM → edge-tts"
+        "pipeline": "STT → [RAG] → LLM → TTS",
+        "rag_enabled": _rag_initialized,
     }
+    if _rag_error:
+        status["rag_error"] = _rag_error
+    if _rag_initialized:
+        status["rag_stats"] = get_index_stats()
+    return status
+
+
+# ── RAG admin endpoints ────────────────────────────────────────────────────────
+@app.post("/rag/rebuild")
+async def rag_rebuild():
+    """Force rebuild the RAG vector store."""
+    if not _rag_initialized:
+        return {"error": "RAG not initialized", "rag_error": _rag_error}
+
+    try:
+        rebuild_index()
+        return {"status": "success", "message": "Vector store rebuilt"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rag/stats")
+async def rag_stats():
+    """Return RAG vector store statistics."""
+    if not _rag_initialized:
+        return {"error": "RAG not initialized", "rag_error": _rag_error}
+    return get_index_stats()
 
 # ── Serve Frontend Web App ───────────────────────────────────────────────────
 import os

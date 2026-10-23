@@ -34,32 +34,69 @@ def load_llm():
     _client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     print(f"[LLM] Client ready — model: {model}, endpoint: {base_url}")
 
-async def generate_response(user_text: str) -> str:
+
+async def generate_response(
+    user_text: str,
+    context: str | None = None
+) -> tuple[str, list[str]]:
     """
     Send user utterance to the LLM and return the assistant's text response.
+    
+    Args:
+        user_text: The user's question or statement
+        context: Optional retrieved context from RAG (retrieved document chunks)
+    
+    Returns:
+        tuple of (reply_text, sources_list)
+        - reply_text: The assistant's response
+        - sources_list: List of source citations (if context was provided)
     """
     if not user_text:
-        return "I didn't catch that. Could you please repeat?"
+        return ("I didn't catch that. Could you please repeat?", [])
 
     if _client is None:
         raise RuntimeError("LLM client not loaded. Call load_llm() first.")
 
     model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
+    # Build messages array
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+    ]
+
+    # If context was provided, prepend it to the user prompt
+    if context:
+        prompt_with_context = (
+            f"Use the following context information to answer the question. "
+            f"Always cite your sources.\n\n"
+            f"Context:\n{context}\n\n"
+            f"Question: {user_text}"
+        )
+        messages.append({"role": "user", "content": prompt_with_context})
+    else:
+        messages.append({"role": "user", "content": user_text})
+
     try:
         response = await _client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system",  "content": SYSTEM_PROMPT},
-                {"role": "user",    "content": user_text},
-            ],
+            messages=messages,
             max_tokens=80,
             temperature=0.6,
         )
         reply = response.choices[0].message.content.strip()
         print(f"[LLM] Response: '{reply}'")
-        return reply
+
+        # If context was provided, extract source citations
+        sources = []
+        if context:
+            # Simple extraction: look for "[Source N: filename]" patterns in context
+            import re
+            pattern = r'\[Source \d+: ([^\]]+)\]'
+            sources = re.findall(pattern, context)
+
+        return (reply, sources)
 
     except Exception as e:
         print(f"[LLM] Error: {e}")
-        return "I'm having trouble thinking right now. Please try again shortly."
+        return ("I'm having trouble thinking right now. Please try again shortly.", [])
+
